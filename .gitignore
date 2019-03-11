@@ -16,7 +16,6 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
-
+.vscode/
 # Serverless directories
 .serverless
-.vscode/launch.json
