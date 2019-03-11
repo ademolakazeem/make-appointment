@@ -1,0 +1,40 @@
+service: appointment # NOTE: update this with your service name
+
+provider:
+  name: aws
+  runtime: python2.7
+  stage: dev
+  region: us-east-1
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:Query"
+        - "dynamodb:GetItem"
+        - "dynamodb:PutItem"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:DeleteItem"
+      Resource: "arn:aws:dynamodb:us-east-1:526688365379:table/appointmentTable"
+
+functions:
+  save:
+    handler: save.lambda_handler
+    events:
+      - https:
+          path: appointment
+          method: post
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    BlogTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: appointmentTable
+        AttributeDefinitions:
+          - AttributeName: appt_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appt_id
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
