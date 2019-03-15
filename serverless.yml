@@ -13,11 +13,18 @@ provider:
         - "dynamodb:PutItem"
         - "dynamodb:UpdateItem"
         - "dynamodb:DeleteItem"
-      Resource: "arn:aws:dynamodb:us-east-1:526688365379:table/appointmentTable"
+      Resource: "arn:aws:dynamodb:us-east-1:710809157942:table/appointmentTable"
 
 functions:
   save:
     handler: save.lambda_handler
+    vpc:
+      securityGroupIds:
+        - sg-031838c559bbc39ec
+      subnetIds:
+        - subnet-a4596888
+        - subnet-c376d0a7
+
     events:
       - https:
           path: appointment
@@ -38,3 +45,10 @@ resources:
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true

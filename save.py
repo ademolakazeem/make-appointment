@@ -18,6 +18,8 @@ import random
 import logging
 import boto3
 import uuid
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -61,8 +63,25 @@ def confirm_intent(session_attributes, intent_name, slots, message, response_car
 
 
 def close(session_attributes, fulfillment_state, message):
-    appendTranscript(session_attributes, 'Lex',
-                     message['content'], 'Lex', session_attributes['id'])
+   # producer = KafkaProducer(
+   #     bootstrap_servers='10.142.29.117:9092', api_version=(0, 10))
+    producer = KafkaProducer(
+        bootstrap_servers='10.142.29.117:9092', api_version=(0, 10))
+    stranscript = appendTranscript(session_attributes, 'Lex',
+                                   message['content'], 'Lex', session_attributes['id'])
+    final_transcript = json.dumps(stranscript)
+    final_id = session_attributes['id']
+    logger.debug("The final Id={}".format(final_id))
+    logger.debug("final transcript: {}".format(final_transcript))
+    nextOne = producer.send('lex-data', b'%s' % final_transcript)
+    producer.flush()
+    try:
+        record_metadata = nextOne.get(timeout=10)
+    except KafkaError:
+        # Decide what to do if produce request failed...
+        log.exception()
+    pass
+
     response = {
         'sessionAttributes': session_attributes,
         'dialogAction': {
@@ -537,18 +556,6 @@ def appendTranscript(output_session_attributes, source, message, user_id, id):
 
     if (source != 'Lex' and source != 'Customer'):
         raise Exception('Invalid Source: {}'.format(source))
-    """
-    custPhoneNumber = "Lex"
-    if (source == 'Customer'):
-        custPhoneNumber = user_id
-        logger.debug("custPhoneNumber: {}".format(custPhoneNumber))
-
-    if (source == 'Lex'):
-        custPhoneNumber = source
-        logger.debug("custPhoneNumber: {}".format(custPhoneNumber))
-    logger.debug("output session attribute: {}".format(
-        output_session_attributes))
-    """
     transcript = []
     output_session_attributes.get('transcript', None)
     if (output_session_attributes.get('transcript') != None):
@@ -590,7 +597,7 @@ def appendTranscript(output_session_attributes, source, message, user_id, id):
         )
         print('update reponse{}'.format(update_response))
         logger.debug('update reponse{}'.format(update_response))
-
+    return output_session_attributes['transcript']
     # end append here
 
 
