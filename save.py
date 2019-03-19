@@ -32,8 +32,7 @@ def elicit_slot(session_attributes, intent_name, slots, slot_to_elicit, message,
     logger.debug("session attribute: {}, intent name: {}, slots: {}, slot to elicit: {}, message: {}, response card: {}".format(
         session_attributes, intent_name, slots, slot_to_elicit, message, response_card))
 
-    appendTranscript(session_attributes, 'Lex',
-                     message['content'], 'Lex', session_attributes['id'])
+    #appendTranscript(session_attributes, message['content'])
     return {
         'sessionAttributes': session_attributes,
         'dialogAction': {
@@ -48,8 +47,7 @@ def elicit_slot(session_attributes, intent_name, slots, slot_to_elicit, message,
 
 
 def confirm_intent(session_attributes, intent_name, slots, message, response_card):
-    appendTranscript(session_attributes, 'Lex',
-                     message['content'], 'Lex', session_attributes['id'])
+    #appendTranscript(session_attributes, message['content'])
     return {
         'sessionAttributes': session_attributes,
         'dialogAction': {
@@ -63,25 +61,7 @@ def confirm_intent(session_attributes, intent_name, slots, message, response_car
 
 
 def close(session_attributes, fulfillment_state, message):
-   # producer = KafkaProducer(
-   #     bootstrap_servers='10.142.29.117:9092', api_version=(0, 10))
-    producer = KafkaProducer(
-        bootstrap_servers='10.142.29.117:9092', api_version=(0, 10))
-    stranscript = appendTranscript(session_attributes, 'Lex',
-                                   message['content'], 'Lex', session_attributes['id'])
-    final_transcript = json.dumps(stranscript)
-    final_id = session_attributes['id']
-    logger.debug("The final Id={}".format(final_id))
-    logger.debug("final transcript: {}".format(final_transcript))
-    nextOne = producer.send('lex-data', b'%s' % final_transcript)
-    producer.flush()
-    try:
-        record_metadata = nextOne.get(timeout=10)
-    except KafkaError:
-        # Decide what to do if produce request failed...
-        log.exception()
-    pass
-
+    #appendTranscript(session_attributes, message)
     response = {
         'sessionAttributes': session_attributes,
         'dialogAction': {
@@ -377,6 +357,8 @@ def make_appointment(intent_request):
     appointment_type = intent_request['currentIntent']['slots']['AppointmentType']
     date = intent_request['currentIntent']['slots']['Date']
     appointment_time = intent_request['currentIntent']['slots']['Time']
+    user_name = intent_request['currentIntent']['slots']['Name']
+    location = intent_request['currentIntent']['slots']['Location']
     source = intent_request['invocationSource']
     output_session_attributes = intent_request['sessionAttributes'] if intent_request['sessionAttributes'] is not None else {
     }
@@ -385,7 +367,6 @@ def make_appointment(intent_request):
         output_session_attributes['id'] = id
     booking_map = json.loads(
         try_ex(lambda: output_session_attributes['bookingMap']) or '{}')
-
     if source == 'DialogCodeHook':
         # Perform basic validation on the supplied input slots.
         slots = intent_request['currentIntent']['slots']
@@ -406,8 +387,9 @@ def make_appointment(intent_request):
                         validation_result['violatedSlot'], appointment_type, date, booking_map)
                 )
             )
-        appendTranscript(output_session_attributes, 'Customer',
-                         intent_request['inputTranscript'], user_id, output_session_attributes['id'])
+        appendTranscript(output_session_attributes,
+                         intent_request['inputTranscript'])
+        #appendTranscript(output_session_attributes, 'Customer', intent_request['inputTranscript'], user_id, output_session_attributes['id'])
 
         if not appointment_type:
             return elicit_slot(
@@ -538,6 +520,9 @@ def make_appointment(intent_request):
         logger.debug('Availabilities for {} were null at fulfillment time.  '
                      'This should have been initialized if this function was configured as the dialog code hook'.format(date))
 
+    # here
+    saveTranscriptAndProduceKafkaTopics(
+        output_session_attributes, user_name, user_id, location, id)
     return close(
         output_session_attributes,
         'Fulfilled',
@@ -548,55 +533,50 @@ def make_appointment(intent_request):
     )
 
 
-# start append here
-
-def appendTranscript(output_session_attributes, source, message, user_id, id):
+def saveTranscriptAndProduceKafkaTopics(output_session_attributes, user_name, user_id, location, id):
+    producer = KafkaProducer(
+        bootstrap_servers='10.142.29.117:9092', api_version=(0, 10))
+    # 10.142.29.117:9092
+    # producer = KafkaProducer(
+    #       bootstrap_servers='10.142.141.174:9092', api_version=(0, 10))
     dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
     table = dynamodb.Table('appointmentTable')
+    transcrpt = json.dumps(output_session_attributes['transcript'])
+    str_transcript = transcrpt.replace("\\", "")
+    lst = [id, user_id, user_name, location, str_transcript]
+    message = ', '.join(lst)
 
-    if (source != 'Lex' and source != 'Customer'):
-        raise Exception('Invalid Source: {}'.format(source))
+    if(id == None):
+        raise Exception("Id cannot be Null")
+    put_response = table.put_item(
+        Item={
+            'appt_id': id,
+            'message': message
+        }
+    )
+    print('put reponse{}'.format(put_response))
+    logger.debug('put reponse{}'.format(put_response))
+
+    nextOne = producer.send('lex-data', b'{}'.format(message))
+    producer.flush()
+    try:
+        record_metadata = nextOne.get(timeout=10)
+    except KafkaError:
+        # Decide what to do if produce request failed...
+        log.exception()
+    pass
+
+# start append here
+
+
+def appendTranscript(output_session_attributes, message):
     transcript = []
     output_session_attributes.get('transcript', None)
     if (output_session_attributes.get('transcript') != None):
         transcript = json.loads(output_session_attributes['transcript'])
-    transcript.append(
-        {
-            "Participant": source,
-            "Message": message,
-            "Timestamp": time.strftime("%d-%m-%Y %H:%M:%S"),
-            "user_id": user_id,
-            "appointment_id": output_session_attributes['id']
-        })
-
+    transcript.append(message)
     output_session_attributes['transcript'] = json.dumps(transcript)
-
-    output_session_attributes.get('appointmentId', None)
-    if (output_session_attributes.get('appointmentId') == None):
-        put_response = table.put_item(
-            Item={
-                'appt_id': output_session_attributes['id'],
-                'message': output_session_attributes['transcript']
-            }
-        )
-        output_session_attributes['appointmentId'] = output_session_attributes['id']
-        print('put reponse{}'.format(put_response))
-        logger.debug('put reponse{}'.format(put_response))
-    elif ((output_session_attributes.get('appointmentId') != None)):
-        update_response = table.update_item(
-            Key={
-                'appt_id': output_session_attributes['id']
-            },
-            UpdateExpression='set #name = :value',
-            ExpressionAttributeNames={
-                '#name': 'message'
-            },
-            ExpressionAttributeValues={
-                ':value': output_session_attributes['transcript']
-            }
-        )
-        print('update reponse{}'.format(update_response))
-        logger.debug('update reponse{}'.format(update_response))
+    # return output_session_attributes['transcript']
     return output_session_attributes['transcript']
     # end append here
 
